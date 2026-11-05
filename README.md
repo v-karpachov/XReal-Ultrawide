@@ -73,6 +73,7 @@ brew install --cask ultraxreal
 - 1920x1080 viewport moves with your head orientation
 - Lean-to-zoom: tilt forward to magnify content (1x–2.5x)
 - Recenter: **Cmd+Shift+R** global hotkey
+- Returns the cursor to the virtual monitor after menu use and redirects it if it crosses onto the glasses output, keeping clicks active
 - Configurable sensitivity (Low / Medium / High)
 - Configurable smoothing (Responsive / Balanced / Smooth)
 - Auto-detects IMU — grays out spatial option if not available

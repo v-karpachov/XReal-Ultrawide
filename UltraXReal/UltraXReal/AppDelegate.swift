@@ -255,6 +255,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(quitItem)
 
         statusItem.menu = menu
+        menu.delegate = self
     }
 
     // MARK: - Static Mode Actions
@@ -533,6 +534,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 button.image = NSImage(systemSymbolName: "display", accessibilityDescription: "UltraXReal")
                 button.image?.isTemplate = true
             }
+        }
+    }
+}
+
+extension AppDelegate: NSMenuDelegate {
+    func menuDidClose(_ menu: NSMenu) {
+        guard isSpatialActive else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+            self?.warpCursorToVirtualDisplay()
         }
     }
 }

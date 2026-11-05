@@ -40,6 +40,8 @@ final class SpatialRenderer: NSObject, ObservableObject {
     // Display output
     private var outputWindow: NSWindow?
     private var metalView: MTKView!
+    private var outputDisplayID: CGDirectDisplayID?
+    private var cursorGuardTimer: Timer?
 
     // Screen capture
     private var stream: SCStream?
@@ -127,6 +129,9 @@ final class SpatialRenderer: NSObject, ObservableObject {
         stream = nil
 
         metalView?.isPaused = true
+        cursorGuardTimer?.invalidate()
+        cursorGuardTimer = nil
+        outputDisplayID = nil
         outputWindow?.orderOut(nil)
         outputWindow = nil
         metalView = nil
@@ -215,6 +220,7 @@ final class SpatialRenderer: NSObject, ObservableObject {
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
         window.isMovable = false
         window.isExcludedFromWindowsMenu = true
+        window.ignoresMouseEvents = true
         window.makeKeyAndOrderFront(nil)
 
         // Force frame *after* orderFront — Tahoe re-clamps borderless windows
@@ -223,8 +229,47 @@ final class SpatialRenderer: NSObject, ObservableObject {
         // the window lands on the built-in display as a thin strip.
         window.setFrame(screenFrame, display: true)
 
+        outputDisplayID = xrealScreen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID
         outputWindow = window
+        startCursorGuard()
         return true
+    }
+
+    /// The glasses remain a real macOS display underneath the renderer. If the
+    /// pointer crosses onto that display, clicks land outside the virtual
+    /// monitor being captured. Redirect the pointer to the same relative
+    /// position on the virtual monitor before the next click.
+    private func startCursorGuard() {
+        cursorGuardTimer?.invalidate()
+
+        let timer = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
+            self?.redirectCursorFromOutputDisplay()
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        cursorGuardTimer = timer
+    }
+
+    private func redirectCursorFromOutputDisplay() {
+        guard let outputDisplayID,
+              let event = CGEvent(source: nil) else { return }
+
+        let point = event.location
+        let outputBounds = CGDisplayBounds(outputDisplayID)
+        guard outputBounds.contains(point) else { return }
+
+        let virtualBounds = CGDisplayBounds(virtualDisplayID)
+        guard outputBounds.width > 0, outputBounds.height > 0,
+              virtualBounds.width > 4, virtualBounds.height > 4 else { return }
+
+        let normalizedX = (point.x - outputBounds.minX) / outputBounds.width
+        let normalizedY = (point.y - outputBounds.minY) / outputBounds.height
+        let target = CGPoint(
+            x: virtualBounds.minX + 2 + normalizedX * (virtualBounds.width - 4),
+            y: virtualBounds.minY + 2 + normalizedY * (virtualBounds.height - 4)
+        )
+
+        CGWarpMouseCursorPosition(target)
+        CGAssociateMouseAndMouseCursorPosition(1)
     }
 
     private func findXRealScreen() -> NSScreen? {
