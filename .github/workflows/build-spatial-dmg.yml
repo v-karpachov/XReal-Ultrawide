@@ -1,10 +1,10 @@
-name: Build PR2 test DMG
+name: Build spatial test DMG
 
 on:
   workflow_dispatch:
   push:
     branches:
-      - fix/golden-gate-spatial-pr2
+      - fix/golden-gate-spatial-pr4
 
 permissions:
   contents: read
@@ -41,7 +41,7 @@ jobs:
         run: |
           APP="$RUNNER_TEMP/DerivedData/Build/Products/Release/UltraXReal.app"
           STAGING="$RUNNER_TEMP/UltraXReal-DMG"
-          DMG="$GITHUB_WORKSPACE/UltraXReal-PR2-GoldenGate-arm64.dmg"
+          DMG="$GITHUB_WORKSPACE/UltraXReal-PR4-GoldenGate-arm64.dmg"
           mkdir -p "$STAGING"
           ditto "$APP" "$STAGING/UltraXReal.app"
           ln -s /Applications "$STAGING/Applications"
@@ -56,9 +56,9 @@ jobs:
       - name: Upload DMG
         uses: actions/upload-artifact@v4
         with:
-          name: UltraXReal-PR2-GoldenGate-arm64
+          name: UltraXReal-PR4-GoldenGate-arm64
           path: |
-            UltraXReal-PR2-GoldenGate-arm64.dmg
-            UltraXReal-PR2-GoldenGate-arm64.dmg.sha256
+            UltraXReal-PR4-GoldenGate-arm64.dmg
+            UltraXReal-PR4-GoldenGate-arm64.dmg.sha256
           if-no-files-found: error
           retention-days: 14
