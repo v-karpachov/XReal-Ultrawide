@@ -1,0 +1,64 @@
+name: Build PR2 test DMG
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - fix/golden-gate-spatial-pr2
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Build Release app
+        run: |
+          xcodebuild \
+            -project UltraXReal/UltraXReal.xcodeproj \
+            -scheme UltraXReal \
+            -configuration Release \
+            -destination 'generic/platform=macOS' \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
+            ARCHS=arm64 \
+            ONLY_ACTIVE_ARCH=NO \
+            build
+
+      - name: Verify app
+        run: |
+          APP="$RUNNER_TEMP/DerivedData/Build/Products/Release/UltraXReal.app"
+          test -d "$APP"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          file "$APP/Contents/MacOS/UltraXReal"
+
+      - name: Create DMG
+        run: |
+          APP="$RUNNER_TEMP/DerivedData/Build/Products/Release/UltraXReal.app"
+          STAGING="$RUNNER_TEMP/UltraXReal-DMG"
+          DMG="$GITHUB_WORKSPACE/UltraXReal-PR2-GoldenGate-arm64.dmg"
+          mkdir -p "$STAGING"
+          ditto "$APP" "$STAGING/UltraXReal.app"
+          ln -s /Applications "$STAGING/Applications"
+          hdiutil create \
+            -volname "UltraXReal PR2 Test" \
+            -srcfolder "$STAGING" \
+            -ov \
+            -format UDZO \
+            "$DMG"
+          shasum -a 256 "$DMG" > "$DMG.sha256"
+
+      - name: Upload DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: UltraXReal-PR2-GoldenGate-arm64
+          path: |
+            UltraXReal-PR2-GoldenGate-arm64.dmg
+            UltraXReal-PR2-GoldenGate-arm64.dmg.sha256
+          if-no-files-found: error
+          retention-days: 14
