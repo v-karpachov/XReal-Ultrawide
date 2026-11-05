@@ -29,9 +29,11 @@
 #include "FusionAxes.h"
 #include "FusionMath.h"
 #include <float.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include "Fusion.h"
 #include "cal_json.h"
@@ -97,6 +99,254 @@ struct device_imu_calibration_t
 };
 
 #define MAX_PACKET_SIZE 64
+
+#define XBX_MCU_PACKET_HEAD 0xFD
+#define XBX_MCU_HEARTBEAT_MSG 0x1A
+#define XBX_MCU_SDK_VERSION_MSG 0x31
+#define XBX_MCU_SDK_VERSION "3.1.1"
+#define XBX_MCU_HEARTBEAT_INTERVAL_MS 100
+#define XBX_MCU_RESPONSE_TIMEOUT_MS 250
+#define XBX_MCU_RESPONSE_ATTEMPTS 8
+
+struct __attribute__((__packed__)) xbx_mcu_packet_t
+{
+	uint8_t head;
+	uint32_t checksum;
+	uint16_t length;
+	uint64_t timestamp;
+	uint16_t msgid;
+	uint8_t reserved[5];
+	uint8_t data[42];
+};
+
+typedef struct xbx_mcu_packet_t xbx_mcu_packet_type;
+
+struct xbx_mcu_heartbeat_t
+{
+	pthread_t thread;
+	volatile bool running;
+};
+
+typedef struct xbx_mcu_heartbeat_t xbx_mcu_heartbeat_type;
+
+static bool xbx_mcu_send_action(device_imu_type *device, uint16_t msgid, uint8_t len, const uint8_t *data)
+{
+	xbx_mcu_packet_type packet;
+	memset(&packet, 0, sizeof(packet));
+
+	const uint16_t packet_len = 17 + len;
+	const uint16_t payload_len = 5 + packet_len;
+
+	packet.head = XBX_MCU_PACKET_HEAD;
+	packet.length = htole16(packet_len);
+	packet.timestamp = htole64(0);
+	packet.msgid = htole16(msgid);
+	if (len > 0)
+	{
+		memcpy(packet.data, data, len);
+	}
+	packet.checksum = htole32(crc32_checksum((const uint8_t *)&packet.length, packet_len));
+
+	const int transferred = hid_write(device->mcu_handle, (const uint8_t *)&packet, payload_len);
+#ifndef NDEBUG
+	if (transferred != payload_len)
+	{
+		fprintf(stderr, "[XBX] write 0x%04x failed: transferred=%d error=%ls\n",
+				msgid, transferred, hid_error(device->mcu_handle));
+	}
+#endif
+	return transferred == payload_len;
+}
+
+static bool xbx_mcu_command(device_imu_type *device, uint16_t msgid, uint8_t len, const uint8_t *data)
+{
+	if (!xbx_mcu_send_action(device, msgid, len, data))
+	{
+		return false;
+	}
+
+	for (int attempt = 0; attempt < XBX_MCU_RESPONSE_ATTEMPTS; attempt++)
+	{
+		xbx_mcu_packet_type response;
+		memset(&response, 0, sizeof(response));
+		const int transferred = hid_read_timeout(
+				device->mcu_handle,
+				(uint8_t *)&response,
+				MAX_PACKET_SIZE,
+				XBX_MCU_RESPONSE_TIMEOUT_MS);
+
+		if (transferred == -1)
+		{
+			return false;
+		}
+		if (transferred > 0 && response.head == XBX_MCU_PACKET_HEAD)
+		{
+			return true;
+		}
+	}
+
+#ifndef NDEBUG
+	fprintf(stderr, "[XBX] command 0x%04x received no acknowledgement\n", msgid);
+#endif
+	return false;
+}
+
+static uint64_t xbx_mcu_monotonic_ns(void)
+{
+	struct timespec ts;
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	return (uint64_t)ts.tv_sec * 1000000000ULL + (uint64_t)ts.tv_nsec;
+}
+
+static bool xbx_mcu_send_heartbeat(device_imu_type *device)
+{
+	const uint64_t now = htole64(xbx_mcu_monotonic_ns());
+	uint8_t payload[8];
+	memcpy(payload, &now, sizeof(now));
+	return xbx_mcu_send_action(device, XBX_MCU_HEARTBEAT_MSG, sizeof(payload), payload);
+}
+
+static void *xbx_mcu_heartbeat_loop(void *context)
+{
+	device_imu_type *device = context;
+	xbx_mcu_heartbeat_type *heartbeat = device->mcu_heartbeat;
+	const struct timespec interval = {
+		.tv_sec = 0,
+		.tv_nsec = XBX_MCU_HEARTBEAT_INTERVAL_MS * 1000000L,
+	};
+
+	while (heartbeat->running)
+	{
+		xbx_mcu_send_heartbeat(device);
+		nanosleep(&interval, NULL);
+	}
+
+	return NULL;
+}
+
+static void xbx_mcu_close(device_imu_type *device)
+{
+	if (device->mcu_heartbeat)
+	{
+		xbx_mcu_heartbeat_type *heartbeat = device->mcu_heartbeat;
+		heartbeat->running = false;
+		pthread_join(heartbeat->thread, NULL);
+		free(heartbeat);
+		device->mcu_heartbeat = NULL;
+	}
+
+	if (device->mcu_handle)
+	{
+		hid_close(device->mcu_handle);
+		device->mcu_handle = NULL;
+	}
+}
+
+static bool xbx_mcu_open(device_imu_type *device)
+{
+	struct hid_device_info *devices = hid_enumerate(device->vendor_id, device->product_id);
+	for (struct hid_device_info *it = devices; it; it = it->next)
+	{
+#ifndef NDEBUG
+		fprintf(stderr, "[XBX] HID interface=%d usagePage=0x%04x usage=0x%04x path=%s\n",
+				it->interface_number, it->usage_page, it->usage, it->path);
+#endif
+		if (it->product_id == device->product_id &&
+			it->interface_number == xreal_mcu_interface_id(device->product_id))
+		{
+			device->mcu_handle = hid_open_path(it->path);
+			break;
+		}
+	}
+	hid_free_enumeration(devices);
+
+	if (!device->mcu_handle)
+	{
+#ifndef NDEBUG
+		fprintf(stderr, "[XBX] MCU interface %d was not found or could not be opened\n",
+				xreal_mcu_interface_id(device->product_id));
+		fprintf(stderr, "[XBX] hidapi error: %ls\n", hid_error(NULL));
+#endif
+		return false;
+	}
+
+	xbx_mcu_packet_type drain;
+	for (int i = 0; i < 4; i++)
+	{
+		if (hid_read_timeout(device->mcu_handle, (uint8_t *)&drain, MAX_PACKET_SIZE, 0) <= 0)
+		{
+			break;
+		}
+	}
+
+	const uint8_t one[4] = {0x01, 0x00, 0x00, 0x00};
+	const struct
+	{
+		uint16_t msgid;
+		uint8_t len;
+		const uint8_t *data;
+	} bootstrap[] = {
+		{0x26, 0, NULL},
+		{0x57, 0, NULL},
+		{0x12, sizeof(one), one},
+		{0x02, sizeof(one), one},
+		{0x34, 0, NULL},
+		{0x35, 0, NULL},
+	};
+
+	for (size_t i = 0; i < sizeof(bootstrap) / sizeof(bootstrap[0]); i++)
+	{
+		if (!xbx_mcu_command(device, bootstrap[i].msgid, bootstrap[i].len, bootstrap[i].data))
+		{
+#ifndef NDEBUG
+			fprintf(stderr, "[XBX] bootstrap stopped at command 0x%04x\n", bootstrap[i].msgid);
+#endif
+			xbx_mcu_close(device);
+			return false;
+		}
+	}
+
+	if (!xbx_mcu_command(
+			device,
+			XBX_MCU_SDK_VERSION_MSG,
+			(uint8_t)strlen(XBX_MCU_SDK_VERSION),
+			(const uint8_t *)XBX_MCU_SDK_VERSION))
+	{
+		xbx_mcu_close(device);
+		return false;
+	}
+
+	for (int i = 0; i < 2; i++)
+	{
+		const uint64_t now = htole64(xbx_mcu_monotonic_ns());
+		uint8_t payload[8];
+		memcpy(payload, &now, sizeof(now));
+		if (!xbx_mcu_command(device, XBX_MCU_HEARTBEAT_MSG, sizeof(payload), payload))
+		{
+			xbx_mcu_close(device);
+			return false;
+		}
+	}
+
+	xbx_mcu_heartbeat_type *heartbeat = calloc(1, sizeof(xbx_mcu_heartbeat_type));
+	if (!heartbeat)
+	{
+		xbx_mcu_close(device);
+		return false;
+	}
+
+	heartbeat->running = true;
+	device->mcu_heartbeat = heartbeat;
+	if (pthread_create(&heartbeat->thread, NULL, xbx_mcu_heartbeat_loop, device) != 0)
+	{
+		free(heartbeat);
+		device->mcu_heartbeat = NULL;
+		xbx_mcu_close(device);
+		return false;
+	}
+
+	return true;
+}
 
 static bool send_payload(device_imu_type *device, uint8_t size, const uint8_t *payload)
 {
@@ -228,52 +478,65 @@ device_imu_error_type device_imu_open(device_imu_type *device, device_imu_event_
 		return DEVICE_IMU_ERROR_NOT_INITIALIZED;
 	}
 
-	struct hid_device_info *info = hid_enumerate(
-			device->vendor_id,
-			device->product_id);
-
-	struct hid_device_info *it = info;
-	while (it)
+	struct hid_device_info *info = hid_enumerate(device->vendor_id, device->product_id);
+	char *imu_path = NULL;
+	int interface_id = -1;
+	for (struct hid_device_info *it = info; it; it = it->next)
 	{
-		int interface_id = xreal_imu_interface_id(it->product_id);
+		interface_id = xreal_imu_interface_id(it->product_id);
 		if (interface_id != -1 && it->interface_number == interface_id)
 		{
 			device->product_id = it->product_id;
-			device->handle = hid_open_path(it->path);
-
-			if (device->handle != NULL)
-			{
-				wchar_t serial_number[256];
-				int result = hid_get_serial_number_string(device->handle, serial_number, 256);
-				if (result == 0)
-				{
-					size_t needed_size = wcstombs(NULL, serial_number, 0);
-					device->serial_number = malloc(needed_size + 1);
-					if (device->serial_number != NULL)
-					{
-						wcstombs(device->serial_number, serial_number, needed_size + 1);
-#ifndef NDEBUG
-						printf("Found IMU device with product_id 0x%x, interface %d, serial number %s\n",
-									 device->product_id, interface_id, device->serial_number);
-#endif
-					}
-				}
-				else
-				{
-					device_imu_error("Failed to retrieve serial number");
-				}
-			}
-
+			imu_path = strdup(it->path);
 			break;
 		}
+	}
+	hid_free_enumeration(info);
 
-		it = it->next;
+	if (!imu_path)
+	{
+		device_imu_error("No IMU path");
+		return DEVICE_IMU_ERROR_NO_HANDLE;
 	}
 
-	hid_free_enumeration(info);
+	// XBX keeps the IMU silent until its MCU receives the SDK handshake and
+	// starts a continuous heartbeat. This must happen before opening interface 1.
+	if (is_xreal_xbx_product_id(device->product_id) && !xbx_mcu_open(device))
+	{
+		free(imu_path);
+		device_imu_error("XBX MCU bootstrap failed");
+		return DEVICE_IMU_ERROR_PAYLOAD_FAILED;
+	}
+
+	device->handle = hid_open_path(imu_path);
+	free(imu_path);
+
+	if (device->handle != NULL)
+	{
+		wchar_t serial_number[256];
+		int result = hid_get_serial_number_string(device->handle, serial_number, 256);
+		if (result == 0)
+		{
+			size_t needed_size = wcstombs(NULL, serial_number, 0);
+			device->serial_number = malloc(needed_size + 1);
+			if (device->serial_number != NULL)
+			{
+				wcstombs(device->serial_number, serial_number, needed_size + 1);
+#ifndef NDEBUG
+				printf("Found IMU device with product_id 0x%x, interface %d, serial number %s\n",
+						 device->product_id, interface_id, device->serial_number);
+#endif
+			}
+		}
+		else
+		{
+			device_imu_error("Failed to retrieve serial number");
+		}
+	}
 
 	if (!device->handle)
 	{
+		xbx_mcu_close(device);
 		device_imu_error("No handle");
 		return DEVICE_IMU_ERROR_NO_HANDLE;
 	}
@@ -1086,6 +1349,8 @@ device_imu_error_type device_imu_close(device_imu_type *device)
 		device_imu_error("No device");
 		return DEVICE_IMU_ERROR_NO_DEVICE;
 	}
+
+	xbx_mcu_close(device);
 
 	if (device->calibration)
 	{

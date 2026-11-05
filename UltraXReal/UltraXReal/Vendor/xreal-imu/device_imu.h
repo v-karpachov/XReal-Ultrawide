@@ -146,6 +146,8 @@ extern "C"
 		char *serial_number;
 
 		void *handle;
+		void *mcu_handle;
+		void *mcu_heartbeat;
 
 		uint32_t static_id;
 

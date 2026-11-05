@@ -71,6 +71,7 @@ final class XRealIMUService: ObservableObject {
 
             if err != DEVICE_IMU_ERROR_NO_ERROR {
                 print("[IMU] Failed to open device: error \(err.rawValue) — retrying in 1s")
+                device_imu_close(dev)
                 dev.deallocate()
                 Thread.sleep(forTimeInterval: 1.0)
                 continue

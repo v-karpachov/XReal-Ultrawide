@@ -39,21 +39,27 @@ const uint16_t xreal_product_ids[NUM_SUPPORTED_PRODUCTS] = {
     0x0424, // XREAL Air
     0x0428, // XREAL Air 2
     0x0432, // XREAL Air 2 Pro
-    0x0426  // XREAL Air 2 Ultra
+    0x0426, // XREAL Air 2 Ultra
+    0x0440, // XREAL XBX A01
+    0x0442  // XREAL XBX A01 Plus
 };
 
 const int xreal_imu_interface_ids[NUM_SUPPORTED_PRODUCTS] = {
     3, // XREAL Air
     3, // XREAL Air 2
     3, // XREAL Air 2 Pro
-    2  // XREAL Air 2 Ultra
+    2, // XREAL Air 2 Ultra
+    1, // XREAL XBX A01
+    1  // XREAL XBX A01 Plus
 };
 
 const int xreal_mcu_interface_ids[NUM_SUPPORTED_PRODUCTS] = {
     4,  // XREAL Air
     4,  // XREAL Air 2
     4,  // XREAL Air 2 Pro
-    0   // XREAL Air 2 Ultra MCU
+    0,  // XREAL Air 2 Ultra MCU
+    0,  // XREAL XBX A01 MCU
+    0   // XREAL XBX A01 Plus MCU
 };
 
 static int xreal_product_index(uint16_t product_id) {
@@ -68,6 +74,10 @@ static int xreal_product_index(uint16_t product_id) {
 
 bool is_xreal_product_id(uint16_t product_id) {
     return xreal_product_index(product_id) >= 0;
+}
+
+bool is_xreal_xbx_product_id(uint16_t product_id) {
+    return product_id == 0x0440 || product_id == 0x0442;
 }
 
 int xreal_imu_interface_id(uint16_t product_id) {

@@ -1,6 +1,6 @@
 # UltraXReal
 
-**Open-source Nebula replacement for macOS. Static ultrawide + spatial head-tracked floating display for XReal Air glasses.**
+**Open-source Nebula replacement for macOS. Static ultrawide + spatial head-tracked floating display for XReal Air and XBX glasses.**
 
 <p align="center">
   <img src="https://img.shields.io/badge/macOS-13.0%2B-blue" alt="macOS">
@@ -110,6 +110,8 @@ Uses Apple's private `CGVirtualDisplay` API — the same API used by [BetterDisp
 ### Head Tracking (Spatial Mode)
 The XReal Air glasses contain an ICM-42688-P IMU (gyroscope + accelerometer). UltraXReal reads this sensor data over USB HID using a vendored C driver from [xrealair-sdk-macos](https://github.com/adidoes/xrealair-sdk-macos), with [Fusion](https://github.com/xioTechnologies/Fusion) Madgwick filter for sensor fusion.
 
+XBX A01 and A01+ use the same IMU packet format, but require an MCU SDK handshake and a continuous heartbeat before streaming sensor data. UltraXReal performs that startup sequence automatically.
+
 ### Rendering Pipeline (Spatial Mode)
 ```
 XReal Air IMU → USB HID → hidapi → Madgwick AHRS → quaternion (60Hz)
@@ -126,7 +128,7 @@ The Metal fragment shader crops a 1920x1080 viewport from the 3840x2160 canvas b
 ## Requirements
 
 - **macOS 13.0 (Ventura)** or later
-- **XReal Air** glasses (original, Air 2, Air 2 Pro, or Air 2 Ultra) via USB-C
+- **XReal Air** (original, Air 2, Air 2 Pro, or Air 2 Ultra) or **XBX** (A01 or A01+) glasses via USB-C
 - **Screen recording permission** (for spatial mode — macOS will prompt on first use)
 - **Xcode 15+** to build from source
 
