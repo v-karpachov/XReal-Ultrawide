@@ -68,6 +68,7 @@ final class SpatialRenderer: NSObject, ObservableObject {
     // Virtual monitor dimensions (pixels, what macOS renders)
     let canvasWidth: Int
     let canvasHeight: Int
+    let refreshRate: Int
 
     // Floating screen geometry — updatable live from the menu sliders.
     var screenDiagonalInches: Float = 65
@@ -80,11 +81,13 @@ final class SpatialRenderer: NSObject, ObservableObject {
     init(virtualDisplayID: CGDirectDisplayID,
          spatialTracker: SpatialTracker,
          canvasWidth: Int = 1920,
-         canvasHeight: Int = 1080) {
+         canvasHeight: Int = 1080,
+         refreshRate: Int = 120) {
         self.virtualDisplayID = virtualDisplayID
         self.spatialTracker = spatialTracker
         self.canvasWidth = canvasWidth
         self.canvasHeight = canvasHeight
+        self.refreshRate = refreshRate
         super.init()
     }
 
@@ -194,7 +197,7 @@ final class SpatialRenderer: NSObject, ObservableObject {
                             device: metalDevice)
         metalView.delegate = self
         metalView.framebufferOnly = true
-        metalView.preferredFramesPerSecond = 60
+        metalView.preferredFramesPerSecond = refreshRate
         metalView.colorPixelFormat = .bgra8Unorm
         metalView.isPaused = false
         metalView.enableSetNeedsDisplay = false
@@ -310,7 +313,7 @@ final class SpatialRenderer: NSObject, ObservableObject {
         let config = SCStreamConfiguration()
         config.width = canvasWidth
         config.height = canvasHeight
-        config.minimumFrameInterval = CMTime(value: 1, timescale: 60)
+        config.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(refreshRate))
         config.pixelFormat = kCVPixelFormatType_32BGRA
         config.queueDepth = 3
         config.showsCursor = true

@@ -328,7 +328,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func enableSpatialMode() {
         // 1. Create the floating monitor's virtual display
         let res = settings.spatialResolution
-        displayManager.enableSpatialCanvas(width: res.width, height: res.height)
+        let refreshRate = 120
+        displayManager.enableSpatialCanvas(
+            width: res.width,
+            height: res.height,
+            refreshRate: Double(refreshRate)
+        )
 
         // 2. Wait for display, then set up the spatial pipeline
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
@@ -359,7 +364,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 virtualDisplayID: virtualID,
                 spatialTracker: tracker,
                 canvasWidth: Int(res.width),
-                canvasHeight: Int(res.height)
+                canvasHeight: Int(res.height),
+                refreshRate: refreshRate
             )
             renderer.screenDiagonalInches = Float(self.settings.screenInches)
             renderer.screenDistanceMeters = Float(self.settings.screenDistance)

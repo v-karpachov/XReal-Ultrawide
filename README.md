@@ -71,6 +71,7 @@ brew install --cask ultraxreal
 **Spatial Floating Mode**
 - 3840x2160 virtual canvas (larger than what you see)
 - 1920x1080 viewport moves with your head orientation
+- 120 Hz virtual display, capture, and Metal rendering pipeline on compatible glasses
 - Lean-to-zoom: tilt forward to magnify content (1x–2.5x)
 - Recenter: **Cmd+Shift+R** global hotkey
 - Returns the cursor to the virtual monitor after menu use and redirects it if it crosses onto the glasses output, keeping clicks active

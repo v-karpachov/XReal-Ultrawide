@@ -61,18 +61,21 @@ final class VirtualDisplayManager: ObservableObject {
         }
     }
 
-    /// Create a large virtual canvas for spatial mode.
-    /// Physical size capped at 597×336mm for ScreenCaptureKit compatibility.
-    func enableSpatialCanvas(width: UInt32 = 3840, height: UInt32 = 2160) {
+    /// Create the virtual canvas used by spatial mode at the requested refresh rate.
+    func enableSpatialCanvas(
+        width: UInt32 = 3840,
+        height: UInt32 = 2160,
+        refreshRate: Double = 120.0
+    ) {
         guard !isActive else { return }
         lastError = nil
 
         displayQueue.async { [weak self] in
-            self?.createSpatialDisplay(width: width, height: height)
+            self?.createSpatialDisplay(width: width, height: height, refreshRate: refreshRate)
         }
     }
 
-    private func createSpatialDisplay(width: UInt32, height: UInt32) {
+    private func createSpatialDisplay(width: UInt32, height: UInt32, refreshRate: Double) {
         let descriptor = CGVirtualDisplayDescriptor()
         descriptor.vendorID = 0x1234
         descriptor.productID = 0x5679  // Different product ID to distinguish from static mode
@@ -87,7 +90,7 @@ final class VirtualDisplayManager: ObservableObject {
         descriptor.queue = displayQueue
 
         guard let nativeMode = CGVirtualDisplayMode(
-            width: width, height: height, refreshRate: 60.0
+            width: width, height: height, refreshRate: refreshRate
         ) else {
             DispatchQueue.main.async { [weak self] in
                 self?.lastError = "Failed to create spatial display mode."
